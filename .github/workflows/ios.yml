@@ -123,35 +123,55 @@ jobs:
         # An IPA that builds but ships no JS bundle installs and then shows a
         # white screen, which is the failure worth catching here rather than on
         # the phone.
+        #
+        # Every command is guarded through `fail`. `set -e` on its own is not
+        # enough: it stops the step at the first failure and reports nothing but
+        # "Process completed with exit code 1", which is exactly what this step
+        # did on its first run. A check that fails silently costs a whole macOS
+        # run and teaches nobody anything.
         run: |
           set -euo pipefail
-          app=$(ls -d Payload/*.app | head -1)
-          name=$(basename "$app")
+
+          fail() { echo "::error::$1"; exit 1; }
+
+          app=$(ls -d Payload/*.app | head -1) || fail "No .app inside Payload."
+          [ -n "$app" ] || fail "Payload is empty."
+          echo "App bundle: $app"
+          ls -la "$app"
+
+          # The executable is named by the plist, not by the bundle's file name.
+          # `basename Foo.app` is "Foo.app", and looking for "Foo.app/Foo.app"
+          # is what broke the first run — the binary is "Foo.app/Foo".
+          name=$(plutil -extract CFBundleExecutable raw "$app/Info.plist" 2>/dev/null) \
+            || name=$(basename "$app" .app)
+          [ -n "$name" ] || fail "Could not work out the executable's name."
 
           bundle="$app/main.jsbundle"
-          if [ ! -f "$bundle" ]; then
-            echo "::error::No main.jsbundle in the app. Metro did not run during the build."
-            ls -la "$app" | head -40
-            exit 1
-          fi
+          [ -f "$bundle" ] || fail "No main.jsbundle in the app. Metro did not run during the build."
           size=$(wc -c < "$bundle")
           echo "main.jsbundle: $size bytes"
-          if [ "$size" -lt 100000 ]; then
-            echo "::error::main.jsbundle is only $size bytes, which is too small to be the app."
-            exit 1
-          fi
+          [ "$size" -ge 100000 ] || fail "main.jsbundle is only $size bytes, which is too small to be the app."
 
           echo "--- Info.plist ---"
-          plutil -extract CFBundleIdentifier raw "$app/Info.plist"
-          plutil -extract CFBundleShortVersionString raw "$app/Info.plist"
-          plutil -extract MinimumOSVersion raw "$app/Info.plist"
+          plutil -extract CFBundleIdentifier raw "$app/Info.plist" || fail "No CFBundleIdentifier."
+          plutil -extract CFBundleShortVersionString raw "$app/Info.plist" || fail "No CFBundleShortVersionString."
+          plutil -extract MinimumOSVersion raw "$app/Info.plist" || fail "No MinimumOSVersion."
 
           echo "--- architectures ---"
-          lipo -archs "$app/$name" | tee /tmp/archs
-          grep -q arm64 /tmp/archs || { echo "::error::The binary is not arm64."; exit 1; }
+          binary="$app/$name"
+          echo "Testing the executable at: $binary"
+          [ -f "$binary" ] || fail "There is no executable called \"$name\" inside the app bundle."
+          archs=$(lipo -archs "$binary") || fail "lipo could not read $binary"
+          echo "$archs"
+          case "$archs" in
+            *arm64*) ;;
+            *) fail "The binary is not arm64. lipo reported: $archs" ;;
+          esac
 
           echo "--- signature (expected to be absent) ---"
           codesign -dv "$app" 2>&1 | head -5 || true
+
+          echo "Check passed."
 
       - uses: actions/upload-artifact@v7
         with:

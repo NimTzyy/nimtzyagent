@@ -1,0 +1,161 @@
+name: iOS
+
+# Builds an unsigned arm64 IPA on a GitHub macOS runner.
+#
+# There is no way to compile iOS on Linux: the toolchain is Xcode, and Apple
+# ships it for macOS only. This workflow is the workaround — the compile happens
+# on GitHub's machines, and the artifact comes back here to be sideloaded.
+#
+# The IPA is deliberately UNSIGNED. Signing needs an Apple-issued certificate,
+# which needs the paid Apple Developer Program. Sideloadly and AltStore both
+# re-sign an unsigned IPA with a free Apple ID on the way in, which is the point
+# of building it this way. Expect that signature to expire after 7 days.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  # Cheap checks first, on Linux. A broken commit should not sit in the macOS
+  # queue or spend macOS minutes, which are billed at 10x on private repos.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run lint
+
+  ipa:
+    needs: verify
+    # Xcode 26 is the oldest Xcode that has the iOS 26 SDK, and app.json asks
+    # for a 26.0 deployment target. The image also carries 26.0.1 through 26.6.
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Pick an Xcode with the iOS 26 SDK
+        run: |
+          set -euo pipefail
+          # Runners move their default Xcode between image updates, so choose
+          # the newest 26.x explicitly and say out loud which one is in use.
+          newest=$(ls -d /Applications/Xcode_26.*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$newest" ]; then
+            sudo xcode-select -s "$newest"
+          fi
+          xcodebuild -version
+          xcodebuild -showsdks | grep -E 'iphoneos' || true
+
+      - run: npm ci
+
+      - name: Generate the iOS project
+        # --no-install because npm ci already ran and pods get their own cache
+        # below. Recreating the native folders is prebuild's default; the flag
+        # to stop it is --no-clean. There is no --clean.
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v6
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: pods-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install pods
+        run: |
+          set -euo pipefail
+          cd ios
+          pod install --repo-update
+
+      - name: Build for a device, unsigned
+        # CODE_SIGNING_ALLOWED=NO is what makes this buildable without an Apple
+        # account. The .app comes out with no _CodeSignature; the sideloading
+        # tool puts one on.
+        run: |
+          set -euo pipefail
+          cd ios
+          workspace=$(ls -d *.xcworkspace | head -1)
+          scheme=$(basename "$workspace" .xcworkspace)
+          echo "Building $scheme from $workspace"
+          xcodebuild \
+            -workspace "$workspace" \
+            -scheme "$scheme" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_ENTITLEMENTS="" \
+            build
+
+      - name: Package the IPA
+        run: |
+          set -euo pipefail
+          app=$(ls -d ios/build/Build/Products/Release-iphoneos/*.app | head -1)
+          echo "App: $app"
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$app" Payload/
+          zip -qry NimTzyAgent-unsigned.ipa Payload
+          ls -lh NimTzyAgent-unsigned.ipa
+
+      - name: Check the artifact is actually usable
+        # An IPA that builds but ships no JS bundle installs and then shows a
+        # white screen, which is the failure worth catching here rather than on
+        # the phone.
+        run: |
+          set -euo pipefail
+          app=$(ls -d Payload/*.app | head -1)
+          name=$(basename "$app")
+
+          bundle="$app/main.jsbundle"
+          if [ ! -f "$bundle" ]; then
+            echo "::error::No main.jsbundle in the app. Metro did not run during the build."
+            ls -la "$app" | head -40
+            exit 1
+          fi
+          size=$(wc -c < "$bundle")
+          echo "main.jsbundle: $size bytes"
+          if [ "$size" -lt 100000 ]; then
+            echo "::error::main.jsbundle is only $size bytes, which is too small to be the app."
+            exit 1
+          fi
+
+          echo "--- Info.plist ---"
+          plutil -extract CFBundleIdentifier raw "$app/Info.plist"
+          plutil -extract CFBundleShortVersionString raw "$app/Info.plist"
+          plutil -extract MinimumOSVersion raw "$app/Info.plist"
+
+          echo "--- architectures ---"
+          lipo -archs "$app/$name" | tee /tmp/archs
+          grep -q arm64 /tmp/archs || { echo "::error::The binary is not arm64."; exit 1; }
+
+          echo "--- signature (expected to be absent) ---"
+          codesign -dv "$app" 2>&1 | head -5 || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nimtzyagent-ios-unsigned-ipa
+          path: NimTzyAgent-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,77 @@
+{
+  "expo": {
+    "name": "NimTzyAgent",
+    "slug": "nimtzyagent",
+    "version": "1.1.2",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "nimtzyagent",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#0B0B0C",
+    "primaryColor": "#FBBF24",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "com.nimtzy.agent",
+      "buildNumber": "2",
+      "supportsTablet": true,
+      "deploymentTarget": "26.0",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSMinimumSystemVersion": "26.0"
+      }
+    },
+    "android": {
+      "package": "com.nimtzy.agent",
+      "versionCode": 4,
+      "predictiveBackGestureEnabled": true,
+      "blockedPermissions": ["android.permission.SYSTEM_ALERT_WINDOW"],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B0B0C"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "./tools/plugins/with-release-signing",
+      "expo-sqlite",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0B0B0C",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#0B0B0C",
+            "image": "./assets/splash-icon.png"
+          }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "NimTzyAgent needs access to your photos so you can send an image to the model.",
+          "cameraPermission": "NimTzyAgent needs the camera so you can take a photo to send to the model.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 36,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildToolsVersion": "36.0.0",
+            "enableProguardInReleaseBuilds": true
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

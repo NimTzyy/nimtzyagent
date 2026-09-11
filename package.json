@@ -1,0 +1,81 @@
+{
+  "name": "nimtzyagent",
+  "main": "expo-router/entry",
+  "version": "1.1.2",
+  "dependencies": {
+    "@expo/ui": "~57.0.17",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~57.0.21",
+    "expo-build-properties": "~57.0.17",
+    "expo-clipboard": "~57.0.1",
+    "expo-constants": "~57.0.17",
+    "expo-device": "~57.0.1",
+    "expo-document-picker": "~57.0.1",
+    "expo-file-system": "~57.0.6",
+    "expo-font": "~57.0.3",
+    "expo-glass-effect": "~57.0.2",
+    "expo-haptics": "~57.0.2",
+    "expo-image": "~57.0.4",
+    "expo-image-manipulator": "~57.0.16",
+    "expo-image-picker": "~57.0.16",
+    "expo-linking": "~57.0.9",
+    "expo-network": "~57.0.1",
+    "expo-router": "~57.0.20",
+    "expo-secure-store": "~57.0.3",
+    "expo-sharing": "~57.0.18",
+    "expo-splash-screen": "~57.0.8",
+    "expo-sqlite": "~57.0.2",
+    "expo-status-bar": "~57.0.1",
+    "expo-symbols": "~57.0.2",
+    "expo-system-ui": "~57.0.3",
+    "expo-web-browser": "~57.0.2",
+    "highlight.js": "^11.12.0",
+    "jest-expo": "~57.0.5",
+    "lucide-react-native": "^1.44.0",
+    "markdown-it": "^15.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-keyboard-controller": "1.21.9",
+    "react-native-reanimated": "4.5.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4",
+    "react-native-web": "~0.21.0",
+    "react-native-webview": "13.16.1",
+    "react-native-worklets": "0.10.1",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/markdown-it": "^14.2.0",
+    "@types/react": "~19.2.2",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~57.0.2",
+    "jest": "^29.7.0",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "assets": "python3 tools/make-assets.py",
+    "build:android": "./tools/build-android.sh",
+    "build:ios": "eas build --platform ios --profile production",
+    "build:android:eas": "eas build --platform android --profile production"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "testMatch": [
+      "**/src/**/__tests__/**/*.test.ts"
+    ],
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/src/$1"
+    }
+  },
+  "private": true
+}

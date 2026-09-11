@@ -143,7 +143,14 @@ function asString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-function parseArguments(raw: string): Record<string, unknown> | null {
+/**
+ * Arguments as a plain object, or `null` when they are not one.
+ *
+ * Also the app's test of whether a call is complete: fragments arrive until the
+ * API stops sending them, and arguments that parse are arguments that arrived
+ * in full.
+ */
+export function parseToolArguments(raw: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
@@ -244,7 +251,7 @@ export async function executeTool(
   rawArguments: string,
   context: ToolContext,
 ): Promise<ToolOutcome> {
-  const args = parseArguments(rawArguments);
+  const args = parseToolArguments(rawArguments);
   if (!args) return { status: 'error', result: BAD_ARGUMENTS };
 
   switch (name) {
@@ -261,7 +268,7 @@ export async function executeTool(
 
 /** A short line describing a call, for the step chips under a message. */
 export function describeToolCall(name: string, rawArguments: string): string {
-  const args = parseArguments(rawArguments);
+  const args = parseToolArguments(rawArguments);
   if (name === TOOL_NAMES.search) {
     const query = args ? asString(args.query) : null;
     return query ? strings.agent.searched(query) : strings.agent.toolSearch;

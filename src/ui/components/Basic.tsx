@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
   type StyleProp,
   type TextInputProps,
@@ -104,6 +105,14 @@ export function IconButton({
   );
 }
 
+/**
+ * How much of the screen a multiline field may take before it scrolls within
+ * itself. Without a bound the field grows with its text: a long system prompt
+ * then makes a field taller than the sheet that holds it, and the lines being
+ * edited sit outside the part of the screen the keyboard left.
+ */
+const MULTILINE_MAX_RATIO = 0.32;
+
 export function TextField({
   label,
   hint,
@@ -112,6 +121,7 @@ export function TextField({
 }: TextInputProps & { label?: string; hint?: string }): React.ReactElement {
   const theme = useTheme();
   const { palette, radius, spacing, type } = theme;
+  const { height: windowHeight } = useWindowDimensions();
   return (
     <View style={{ gap: spacing.xs }}>
       {label ? <Text style={[type.meta, { color: palette.textSecondary }]}>{label}</Text> : null}
@@ -130,6 +140,9 @@ export function TextField({
             paddingHorizontal: spacing.md,
             paddingVertical: spacing.md,
             minHeight: 46,
+            maxHeight: inputProps.multiline
+              ? Math.round(windowHeight * MULTILINE_MAX_RATIO)
+              : undefined,
           },
           style,
         ]}
@@ -290,7 +303,6 @@ export function Sheet({
         onPress={onClose}
       />
       <View style={styles.sheetAnchor} pointerEvents="box-none">
-        <SheetKeyboardLift />
         <View
           style={{
             backgroundColor: palette.elevated,
@@ -300,6 +312,11 @@ export function Sheet({
             padding: spacing.lg,
             gap: spacing.md,
             maxHeight: '80%',
+            // The anchor lays out flush to the bottom, so the lift below this
+            // card is what holds it above the keyboard — and since the card is
+            // the only child that may shrink, its height follows the lift
+            // instead of running off the top of the screen.
+            flexShrink: 1,
             width: '100%',
             maxWidth: 520,
           }}
@@ -309,6 +326,7 @@ export function Sheet({
             {children}
           </ScrollView>
         </View>
+        <SheetKeyboardLift />
       </View>
     </Modal>
   );
@@ -435,10 +453,14 @@ const styles = StyleSheet.create({
  *
  * Sheets hold text inputs (renaming a chat, editing a message, writing a
  * system prompt) and open with the keyboard already up, so without this the
- * input sits underneath it. The anchor lays out flush to the bottom, which is
- * what turns a spacer into lift. The height arrives negative while the
- * keyboard is open (that sign is what moves a sticky view up), so it is
- * negated here.
+ * input sits underneath it.
+ *
+ * It has to be the anchor's **last** child. The anchor lays out flush to the
+ * bottom, so whichever child comes last is the one pinned there: with the
+ * spacer last the card is pushed up by the keyboard's height, and with the
+ * spacer first it only opens an empty gap above a card that never moves. The
+ * height arrives negative while the keyboard is open (that sign is what moves
+ * a sticky view up), so it is negated here.
  */
 function SheetKeyboardLift(): React.ReactElement {
   const { height } = useReanimatedKeyboardAnimation();

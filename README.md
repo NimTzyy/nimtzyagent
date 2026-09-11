@@ -50,7 +50,7 @@ Requires JDK 17 and an Android SDK with platform 36 and build-tools 36.0.0.
 
 ```bash
 ./tools/build-android.sh
-# -> dist/nimtzyagent-1.1.2-arm64.apk   (also under android/app/build/outputs/apk/release/)
+# -> dist/nimtzyagent-1.1.3-arm64.apk   (also under android/app/build/outputs/apk/release/)
 ```
 
 The script prints the SHA-256 of the APK. It keeps a copy in `dist/` because
@@ -163,6 +163,16 @@ Notes on the parts that carry the most weight:
   split at arbitrary offsets — including in the middle of a blank-line boundary.
 - `src/core/stream.ts` is the only place that knows the wire field names. If
   DeepSeek renames a field, that file is the whole fix.
+- `src/core/round.ts` folds one streamed round into a draft, and holds the two
+  rules for reading it that the streaming code cannot check by eye. A `[DONE]`
+  sentinel names no finish reason, and because it arrives in the same read as
+  the last real chunk, treating it as authoritative erases the reason just
+  given — an erased `tool_calls` silently skips the tool and leaves the user a
+  step chip with no answer after it. And a round is a tool round when the API
+  said so *or* when every call's arguments parse, since a stream can stop
+  between the arguments and the reason. Both are pinned by
+  `src/core/__tests__/round.test.ts`, which folds real decodes of the wire
+  format rather than hand-built events.
 - `src/core/models.ts` is the only place that knows model IDs. DeepSeek retires
   aliases without warning, so nothing else in the app hardcodes one.
 - `src/state/chat.ts` buffers streaming text and flushes every 40 ms rather than
@@ -170,6 +180,13 @@ Notes on the parts that carry the most weight:
 - Images are downscaled to a 1300 px longest edge at pick time and encoded to
   base64 only when a message is sent, so neither the database nor memory holds
   megabytes of image data.
+- `Sheet` in `src/ui/components/Basic.tsx` is the app's only modal, and its
+  layout is load-bearing. The anchor lays out flush to the bottom, so the
+  keyboard spacer has to be the anchor's **last** child: placed first it only
+  opens a gap above a card that never moves. The card carries `flexShrink: 1`
+  so that as the spacer grows the card's height follows it, instead of a long
+  system prompt pushing the card's own top off the screen. Editing either of
+  those two facts re-breaks editing inside sheets on Android.
 
 ## Tools the model can call
 

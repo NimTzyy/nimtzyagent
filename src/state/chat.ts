@@ -4,6 +4,14 @@ import { create } from 'zustand';
 import { ApiError, completeChat, isAbortError, streamChat } from '@/core/api';
 import { buildRequestMessages, titleFromFirstMessage } from '@/core/messages';
 import { resolveModel } from '@/core/models';
+import {
+  applyStreamEvent,
+  beginRound,
+  callsOf,
+  createDraft,
+  isToolRound,
+  mergeCompletion,
+} from '@/core/round';
 import { buildTools, executeTool, toolPreamble, type ToolContext } from '@/core/tools';
 import type {
   Attachment,
@@ -12,7 +20,6 @@ import type {
   MessageStatus,
   StreamEvent,
   ToolCall,
-  Usage,
 } from '@/core/types';
 import * as conversationRepo from '@/db/conversations';
 import * as messageRepo from '@/db/messages';
@@ -130,9 +137,8 @@ export const useChat = create<ChatState>((set, get) => {
       signal,
     };
 
-    let content = '';
-    let reasoning = '';
-    let usage: Usage | undefined;
+    /** The turn's text, usage and the round in progress; see `core/round.ts`. */
+    const draft = createDraft();
     let thinkingMs: number | undefined;
     let reasoningStartedAt: number | null = null;
     /** Calls that have run, with their results. */
@@ -149,10 +155,10 @@ export const useChat = create<ChatState>((set, get) => {
       const calls = [...finished, ...active];
       const updated: ChatMessage = {
         ...current,
-        content,
-        reasoning: reasoning.length > 0 ? reasoning : undefined,
+        content: draft.content,
+        reasoning: draft.reasoning.length > 0 ? draft.reasoning : undefined,
         toolCalls: calls.length > 0 ? calls : undefined,
-        usage,
+        usage: draft.usage,
         thinkingMs,
         status,
       };
@@ -173,20 +179,6 @@ export const useChat = create<ChatState>((set, get) => {
       if (!flushTimer) flushTimer = setTimeout(flush, FLUSH_INTERVAL_MS);
     };
 
-    /** Each round is billed separately, so a turn's cost is their sum. */
-    const addUsage = (next?: Usage) => {
-      if (!next) return;
-      usage = usage
-        ? {
-            promptTokens: usage.promptTokens + next.promptTokens,
-            completionTokens: usage.completionTokens + next.completionTokens,
-            totalTokens: usage.totalTokens + next.totalTokens,
-            cacheHitTokens: usage.cacheHitTokens + next.cacheHitTokens,
-            cacheMissTokens: usage.cacheMissTokens + next.cacheMissTokens,
-          }
-        : next;
-    };
-
     // Hydrated once: later rounds resend the same conversation, and rebuilding
     // image data URLs for each would be wasted work.
     const baseMessages = await hydrateMessages(get().messages);
@@ -195,60 +187,32 @@ export const useChat = create<ChatState>((set, get) => {
         message.id === assistantId
           ? {
               ...message,
-              content,
-              reasoning: reasoning.length > 0 ? reasoning : undefined,
+              content: draft.content,
+              reasoning: draft.reasoning.length > 0 ? draft.reasoning : undefined,
               toolCalls: [...finished, ...active],
             }
           : message,
       );
 
-    interface RoundResult {
-      calls: ToolCall[];
-      finishReason?: string;
-      error: string | null;
-    }
-
-    const runRound = async (): Promise<RoundResult> => {
-      const fragments = new Map<number, ToolCall>();
-      let finishReason: string | undefined;
-      let streamError: string | null = null;
+    const runRound = async (): Promise<void> => {
+      beginRound(draft);
 
       const applyEvent = (event: StreamEvent) => {
-        switch (event.type) {
-          case 'reasoning':
-            if (reasoningStartedAt === null) reasoningStartedAt = Date.now();
-            reasoning += event.text;
-            schedule();
-            break;
-          case 'content':
-            if (reasoningStartedAt !== null && thinkingMs === undefined) {
-              thinkingMs = Date.now() - reasoningStartedAt;
-            }
-            content += event.text;
-            schedule();
-            break;
-          case 'tool_call': {
-            // Fragments are split by index: the first for an index carries the
-            // id and function name, the rest only append argument text.
-            const existing = fragments.get(event.index);
-            fragments.set(event.index, {
-              id: event.id ?? existing?.id ?? `call_${event.index}`,
-              name: event.name ?? existing?.name ?? '',
-              arguments: (existing?.arguments ?? '') + (event.arguments ?? ''),
-              status: 'pending',
-            });
-            schedule();
-            break;
-          }
-          case 'usage':
-            addUsage(event.usage);
-            break;
-          case 'error':
-            streamError = event.message;
-            break;
-          case 'done':
-            finishReason = event.finishReason;
-            break;
+        // How long the model spent thinking before it started answering.
+        if (event.type === 'reasoning' && reasoningStartedAt === null) {
+          reasoningStartedAt = Date.now();
+        } else if (
+          event.type === 'content' &&
+          reasoningStartedAt !== null &&
+          thinkingMs === undefined
+        ) {
+          thinkingMs = Date.now() - reasoningStartedAt;
+        }
+
+        applyStreamEvent(draft, event);
+
+        if (event.type === 'content' || event.type === 'reasoning' || event.type === 'tool_call') {
+          schedule();
         }
       };
 
@@ -274,22 +238,9 @@ export const useChat = create<ChatState>((set, get) => {
       if (preferences.streaming) {
         await streamChat({ ...params, onEvent: applyEvent });
       } else {
-        const result = await completeChat(params);
-        content += result.content;
-        reasoning += result.reasoning ?? '';
-        addUsage(result.usage);
-        finishReason = result.finishReason;
-        for (const [index, entry] of (result.toolCalls ?? []).entries()) {
-          fragments.set(index, entry);
-        }
+        mergeCompletion(draft, await completeChat(params));
         applyToState('complete');
       }
-
-      return {
-        calls: [...fragments.entries()].sort(([a], [b]) => a - b).map(([, entry]) => entry),
-        finishReason,
-        error: streamError,
-      };
     };
 
     const executeCalls = async (): Promise<void> => {
@@ -328,19 +279,25 @@ export const useChat = create<ChatState>((set, get) => {
 
     try {
       for (;;) {
-        const round = await runRound();
-        active = round.calls;
+        await runRound();
+        active = callsOf(draft);
         if (active.length > 0) applyToState('complete');
 
-        if (round.error && active.length === 0 && content.length === 0 && reasoning.length === 0) {
+        if (
+          draft.error &&
+          active.length === 0 &&
+          draft.content.length === 0 &&
+          draft.reasoning.length === 0
+        ) {
           status = 'error';
-          failure = round.error;
+          failure = draft.error;
           break;
         }
 
-        // Arguments only count as complete when the API said the turn ended on
-        // a call; a stream that stopped early may have half of one.
-        if (round.finishReason !== 'tool_calls' || active.length === 0) break;
+        // Whether the round asked for tools, and whether the calls it described
+        // arrived whole. See `core/round.ts` for why the finish reason alone is
+        // not the answer.
+        if (!isToolRound(draft)) break;
         if (rounds >= MAX_TOOL_ROUNDS) {
           capped = true;
           break;

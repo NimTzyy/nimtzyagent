@@ -1,0 +1,83 @@
+name: Publish IPA
+
+# Takes the .ipa the iOS workflow produced and attaches it to a release, where
+# it can be downloaded with a plain link.
+#
+# The build artifact itself is useless for this: fetching one needs a GitHub
+# login, and an unauthenticated request gets `401 Requires authentication`.
+# Release assets have no such gate. That matters because the file has to reach
+# a phone and a server, neither of which is going to authenticate.
+#
+# This runs on Linux, so unlike the build it costs nothing worth counting.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/publish-ipa.yml'
+
+permissions:
+  contents: write   # create the release
+  actions: read     # download the artifact from the iOS run
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch the newest successful iOS build
+        # Every command is guarded, for the same reason as in the iOS workflow:
+        # `set -e` alone reports a bare "exit code 1" and hides the reason.
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          run_id=$(gh run list --workflow=ios.yml --status=success --limit=1 \
+                     --json databaseId --jq '.[0].databaseId') \
+            || fail "Could not list iOS runs."
+          [ -n "$run_id" ] || fail "There is no successful iOS run to publish."
+
+          echo "Taking the artifact from run $run_id"
+          gh run download "$run_id" -n nimtzyagent-ios-unsigned-ipa -D out \
+            || fail "Could not download the artifact from run $run_id."
+          ls -la out
+
+      - name: Check the IPA is really there
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          ipa=$(ls out/*.ipa 2>/dev/null | head -1) || true
+          [ -n "$ipa" ] || fail "The artifact contains no .ipa."
+          size=$(wc -c < "$ipa")
+          echo "$ipa is $size bytes"
+          [ "$size" -gt 1000000 ] || fail "The IPA is only $size bytes, which is too small to be the app."
+
+          # Kept beside the IPA so the phone can verify what it downloaded.
+          sha256sum "$ipa" | tee out/SHA256.txt
+
+      - name: Publish it as a release
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          version=$(python3 -c "import json;print(json.load(open('app.json'))['expo']['version'])") \
+            || fail "Could not read the version from app.json."
+          tag="ios-${version}-${GITHUB_SHA::7}"
+          echo "Publishing $tag"
+
+          # Re-running this workflow must not fail on an existing tag.
+          gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
+
+          gh release create "$tag" out/*.ipa out/SHA256.txt \
+            --title "iOS $version (unsigned IPA)" \
+            --notes "Unsigned arm64 IPA built by the iOS workflow from ${GITHUB_SHA}.
+
+Sign it on the device with a certificate before installing -- the phone will not install it as it stands.
+
+The asset URL \`/releases/latest/download/NimTzyAgent-unsigned.ipa\` always serves the newest build." \
+            || fail "gh release create failed."

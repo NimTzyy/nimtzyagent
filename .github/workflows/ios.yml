@@ -15,6 +15,14 @@ on:
   workflow_dispatch:
   push:
     branches: [master, main]
+    # Markdown, the build scripts and the IPA-publishing workflow cannot change
+    # the app, and a macOS run is the expensive kind. This file itself is NOT
+    # ignored, so a change to the workflow is always exercised before it is
+    # trusted.
+    paths-ignore:
+      - '**.md'
+      - 'tools/**'
+      - '.github/workflows/publish-ipa.yml'
 
 permissions:
   contents: read

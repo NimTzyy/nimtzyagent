@@ -6,7 +6,7 @@ name: Publish IPA
 # The build artifact itself is useless for this: fetching one needs a GitHub
 # login, and an unauthenticated request gets `401 Requires authentication`.
 # Release assets have no such gate. That matters because the file has to reach
-# a phone and a server, neither of which is going to authenticate.
+# a phone and a Linux server, neither of which is going to authenticate.
 #
 # This runs on Linux, so unlike the build it costs nothing worth counting.
 
@@ -57,7 +57,7 @@ jobs:
           echo "$ipa is $size bytes"
           [ "$size" -gt 1000000 ] || fail "The IPA is only $size bytes, which is too small to be the app."
 
-          # Kept beside the IPA so the phone can verify what it downloaded.
+          # Kept beside the IPA so the phone can check what it downloaded.
           sha256sum "$ipa" | tee out/SHA256.txt
 
       - name: Publish it as a release
@@ -70,14 +70,18 @@ jobs:
           tag="ios-${version}-${GITHUB_SHA::7}"
           echo "Publishing $tag"
 
+          # Built line by line: a multi-line quoted string inside a `run:` block
+          # has to be indented to the block, and an unindented continuation
+          # silently breaks the YAML. This file was invalid for exactly that
+          # reason once already.
+          notes="Unsigned arm64 IPA built by the iOS workflow from ${GITHUB_SHA}."
+          notes="${notes}"$'\n\n'"Sign it on the device with a certificate before installing; the phone will not install it as it stands."
+          notes="${notes}"$'\n\n'"The URL /releases/latest/download/NimTzyAgent-unsigned.ipa always serves the newest build."
+
           # Re-running this workflow must not fail on an existing tag.
           gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
 
           gh release create "$tag" out/*.ipa out/SHA256.txt \
             --title "iOS $version (unsigned IPA)" \
-            --notes "Unsigned arm64 IPA built by the iOS workflow from ${GITHUB_SHA}.
-
-Sign it on the device with a certificate before installing -- the phone will not install it as it stands.
-
-The asset URL \`/releases/latest/download/NimTzyAgent-unsigned.ipa\` always serves the newest build." \
+            --notes "$notes" \
             || fail "gh release create failed."

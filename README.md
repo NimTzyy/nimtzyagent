@@ -50,7 +50,7 @@ Requires JDK 17 and an Android SDK with platform 36 and build-tools 36.0.0.
 
 ```bash
 ./tools/build-android.sh
-# -> dist/nimtzyagent-1.1.3-arm64.apk   (also under android/app/build/outputs/apk/release/)
+# -> dist/nimtzyagent-1.1.4-arm64.apk   (also under android/app/build/outputs/apk/release/)
 ```
 
 The script prints the SHA-256 of the APK. It keeps a copy in `dist/` because
@@ -180,6 +180,15 @@ Notes on the parts that carry the most weight:
 - Images are downscaled to a 1300 px longest edge at pick time and encoded to
   base64 only when a message is sent, so neither the database nor memory holds
   megabytes of image data.
+- `pickTextFile` in `src/lib/files.ts` asks the system picker for `*/*` and
+  decides for itself what it can read. A MIME list passed to the picker is
+  enforced by the OS rather than by this app, and it hides files this app reads
+  fine: Android providers report code, markdown and log files as
+  `application/octet-stream`, which is on none of the types that used to be
+  listed, and iOS matches a listed type against its own declarations. The result
+  is files that can be seen but not chosen, which reads as the attach button
+  being broken. A read failure is also reported as such rather than as
+  "not a text file", since the two need different fixes from the user.
 - `Sheet` in `src/ui/components/Basic.tsx` is the app's only modal, and its
   layout is load-bearing. The anchor lays out flush to the bottom, so the
   keyboard spacer has to be the anchor's **last** child: placed first it only

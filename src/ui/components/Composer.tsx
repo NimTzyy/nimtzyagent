@@ -127,7 +127,16 @@ export function Composer({
   const capture = useCallback(
     async (task: () => Promise<{ attachments: Attachment[]; error?: string }>) => {
       setSheetOpen(false);
-      const outcome = await task();
+      // The pickers are native and their failures arrive as rejections, not as
+      // an `error` in the outcome. Letting one through would leave the tap with
+      // no visible effect at all, which reads as the button being broken.
+      let outcome: { attachments: Attachment[]; error?: string };
+      try {
+        outcome = await task();
+      } catch {
+        setError(strings.chat.attachFailed);
+        return;
+      }
       if (outcome.error) {
         setError(outcome.error);
         if (outcome.attachments.length === 0) return;

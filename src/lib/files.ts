@@ -16,8 +16,17 @@ export interface FileOutcome {
 }
 
 export async function pickTextFile(): Promise<FileOutcome> {
+  // `*/*`, deliberately: any file can be chosen, and the app decides what it
+  // can read. A MIME list here is enforced by the system picker rather than by
+  // this app, and it hides files this app reads perfectly well — Android's
+  // providers report code, markdown and log files as `application/octet-stream`,
+  // which matches none of `text/*`, `application/json`, `application/xml` or
+  // `application/javascript`, and iOS matches a listed type against its own
+  // declarations, so `text/*` there means only what declares text conformance.
+  // Either way the result is the same one users report: files they can see but
+  // cannot choose. The checks below are the ones that should decide.
   const result = await DocumentPicker.getDocumentAsync({
-    type: ['text/*', 'application/json', 'application/xml', 'application/javascript'],
+    type: '*/*',
     copyToCacheDirectory: true,
     multiple: false,
   });
@@ -28,14 +37,27 @@ export async function pickTextFile(): Promise<FileOutcome> {
   const mime = asset.mimeType ?? 'text/plain';
   const looksTextual = mime.startsWith('text/') || mime === 'application/json' || isTextFilename(name);
   if (!looksTextual) return { error: strings.chat.unsupportedFile };
-  if ((asset.size ?? 0) > MAX_TEXT_ATTACHMENT_BYTES) return { error: strings.chat.fileTooLarge };
+
+  const file = new File(asset.uri);
+  // Not every provider announces a size, and the one that does not is the one
+  // whose file would otherwise be read into memory whole before being refused.
+  let size = asset.size ?? 0;
+  if (size === 0) {
+    try {
+      size = file.size ?? 0;
+    } catch {
+      size = 0;
+    }
+  }
+  if (size > MAX_TEXT_ATTACHMENT_BYTES) return { error: strings.chat.fileTooLarge };
 
   let text: string;
   try {
-    text = await new File(asset.uri).text();
+    text = await file.text();
   } catch {
-    return { error: strings.chat.unsupportedFile };
+    return { error: strings.chat.unreadableFile };
   }
+  if (text.length > MAX_TEXT_ATTACHMENT_BYTES) return { error: strings.chat.fileTooLarge };
 
   return {
     attachment: {

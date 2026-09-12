@@ -90,6 +90,8 @@ export const strings = {
     imageTooLarge: 'That image is larger than 32 MB.',
     fileTooLarge: 'That file is larger than the 256 KB inline limit.',
     unsupportedFile: 'Only text-based files can be attached.',
+    unreadableFile: 'That file could not be read.',
+    attachFailed: 'The attachment could not be opened.',
     permissionDenied: 'Permission was not granted.',
     clipboardEmpty: 'The clipboard has no image.',
     noKey: 'Add an API key in Settings to send messages.',

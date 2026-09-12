@@ -10,6 +10,10 @@ name: Publish IPA
 #
 # This runs on Linux, so unlike the build it costs nothing worth counting.
 
+# It runs when this file changes, and that is deliberate: it publishes the
+# newest *successful* iOS run, so nudging it before that run has finished would
+# publish the previous build under the new version's tag. Touch this file after
+# the iOS run goes green, not alongside the commit that starts it.
 on:
   workflow_dispatch:
   push:
